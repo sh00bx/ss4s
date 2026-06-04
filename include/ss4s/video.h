@@ -41,6 +41,8 @@ typedef struct SS4S_VideoInfo {
     SS4S_VideoCodec codec;
     int width, height;
     int frameRateNumerator, frameRateDenominator;
+    bool tightFramePacing;
+    int presentationOffsetMs;
 } SS4S_VideoInfo;
 
 typedef struct SS4S_VideoDisplayPrimaries {
