@@ -366,6 +366,21 @@ jvalue_ref MakeLoadPayload(SS4S_PlayerContext *ctx, const SS4S_AudioInfo *audioI
     // Recognized on webOS 5+, doesn't seem to have any effect
     jobject_set(option, J_CSTR_TO_BUF("lowDelayMode"), jboolean_true());
 
+    /* Aurora's tight-sync hints. The struct fields exist in SS4S_VideoInfo but
+     * upstream/Aurora never plumbed them into the Starfish load payload, making
+     * the whole tight-sync code a no-op. Pass them through best-effort: if
+     * Starfish recognises the keys, frame pacing tightens; if not, the keys
+     * are silently ignored (same outcome as before this patch). */
+    if (videoInfo != NULL) {
+        if (videoInfo->tightFramePacing) {
+            jobject_set(option, J_CSTR_TO_BUF("tightFramePacing"), jboolean_true());
+        }
+        if (videoInfo->presentationOffsetMs != 0) {
+            jobject_set(option, J_CSTR_TO_BUF("presentationOffsetMs"),
+                        jnumber_create_i32(videoInfo->presentationOffsetMs));
+        }
+    }
+
     if (videoInfo) {
         int frameRate = 6000;
         if (videoInfo->frameRateNumerator != 0 && videoInfo->frameRateDenominator != 0) {
