@@ -70,6 +70,8 @@ static SS4S_AudioOpenResult OpenAudio(const SS4S_AudioInfo *info, SS4S_AudioInst
                     .sampleRate = NDL_DIRECTMEDIA_AUDIO_PCM_SAMPLE_RATE_OF(info->sampleRate),
             };
             context->mediaInfo.audio.pcm = pcmInfo;
+            SS4S_NDL_webOS5_ConfigureAudioPacing(context, info->sampleRate, info->samplesPerFrame,
+                                                 (int) (info->numOfChannels * sizeof(int16_t)));
             break;
         }
         case SS4S_AUDIO_OPUS: {
@@ -103,6 +105,8 @@ static SS4S_AudioOpenResult OpenAudio(const SS4S_AudioInfo *info, SS4S_AudioInst
                 }
             }
             context->mediaInfo.audio.opus = opusInfo;
+            /* Compressed packets carry no byte-derivable duration, so pace on samplesPerFrame. */
+            SS4S_NDL_webOS5_ConfigureAudioPacing(context, info->sampleRate, info->samplesPerFrame, 0);
             break;
         }
         default: {
@@ -125,7 +129,7 @@ static SS4S_AudioOpenResult OpenAudio(const SS4S_AudioInfo *info, SS4S_AudioInst
 
 static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsigned char *data, size_t size) {
     pthread_mutex_lock(&SS4S_NDL_webOS5_Lock);
-    const SS4S_PlayerContext *context = (void *) instance;
+    SS4S_PlayerContext *context = (void *) instance;
     if (!context->mediaLoaded) {
         pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
         return SS4S_AUDIO_FEED_NOT_READY;
@@ -141,7 +145,7 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
         data = SS4S_NDLOpusFixGetBuffer(context->opusFix);
         size = fixedSize;
     }
-    uint64_t pts = SS4S_NDL_webOS5_GetPts(context);
+    uint64_t pts = SS4S_NDL_webOS5_NextAudioPts(context, size);
     rc = NDL_DirectAudioPlay((void *) data, size, (long long) pts);
     if (rc != 0) {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "NDL_DirectAudioPlay returned %d: %s", rc,

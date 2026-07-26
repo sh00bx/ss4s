@@ -89,15 +89,126 @@ void SS4S_NDL_webOS5_ConfigureSmoothPacing(SS4S_PlayerContext *context, int fpsN
         intervalMs = 1.0;
     }
     context->smoothIntervalMs = intervalMs;
-    context->smoothMaxDriftMs = intervalMs * 2.0;
+    // Env-tunable max pacing drift (frames). A/B TEST BUILD: default flipped to 0.5 to match
+    // upstream 2e6584d / aurora-tv v1.1.7 (tighter pacing, lower latency, more judder risk).
+    // Baseline was 2.0; env SS4S_SMOOTH_PACING_MAX_DRIFT_FRAMES still overrides. Range clamp per upstream.
+    double driftFrames = 0.5;
+    const char *driftEnv = getenv("SS4S_SMOOTH_PACING_MAX_DRIFT_FRAMES");
+    if (driftEnv != NULL && driftEnv[0] != '\0') {
+        double d = strtod(driftEnv, NULL);
+        if (d >= 0.15 && d <= 4.0) {
+            driftFrames = d;
+        }
+    }
+    context->smoothMaxDriftMs = intervalMs * driftFrames;
 
     if (enabled) {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL",
-                            "Smooth pacing enabled interval=%.2fms maxDrift=%.2fms",
-                            context->smoothIntervalMs, context->smoothMaxDriftMs);
+                            "Smooth pacing enabled interval=%.2fms maxDrift=%.2fms (%.2f frames)",
+                            context->smoothIntervalMs, context->smoothMaxDriftMs, driftFrames);
     } else {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL", "Smooth pacing disabled (wall-clock PTS)");
     }
+}
+
+void SS4S_NDL_webOS5_ConfigureAudioPacing(SS4S_PlayerContext *context, int sampleRate, int samplesPerFrame,
+                                          int bytesPerSample) {
+    if (!context) {
+        return;
+    }
+    /* Default ON unless explicitly disabled with "0"/"false"/"off". */
+    bool enabled = true;
+    const char *env = getenv("SS4S_AUDIO_PACING");
+    if (env != NULL && env[0] != '\0') {
+        if (env[0] == '0' || strcmp(env, "false") == 0 || strcmp(env, "off") == 0 ||
+            strcmp(env, "FALSE") == 0 || strcmp(env, "OFF") == 0) {
+            enabled = false;
+        }
+    }
+    context->audioPacing = enabled;
+    context->audioPtsInitialized = false;
+    context->audioNextPtsMs = 0;
+    context->audioSampleRate = sampleRate > 0 ? (double) sampleRate : 48000.0;
+    context->audioBytesPerSample = bytesPerSample > 0 ? bytesPerSample : 0;
+    context->audioFrameMs = samplesPerFrame > 0 ? (double) samplesPerFrame * 1000.0 / context->audioSampleRate : 5.0;
+    context->audioStatsLastLogMs = 0;
+    context->audioFedPackets = 0;
+    context->audioReanchors = 0;
+    context->audioLeadMinMs = 0;
+    context->audioLeadMaxMs = 0;
+
+    /*
+     * Arrival jitter above this band is treated as a genuine timeline break (long stall, whole
+     * FEC block lost, clock drift) and the virtual timeline snaps back to the wall clock.
+     */
+    double maxDriftMs = 45.0;
+    const char *driftEnv = getenv("SS4S_AUDIO_PACING_MAX_DRIFT_MS");
+    if (driftEnv != NULL && driftEnv[0] != '\0') {
+        double d = strtod(driftEnv, NULL);
+        if (d >= 5.0 && d <= 500.0) {
+            maxDriftMs = d;
+        }
+    }
+    context->audioMaxDriftMs = maxDriftMs;
+
+    if (enabled) {
+        SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL",
+                            "Audio pacing enabled frame=%.2fms bytesPerSample=%d maxDrift=%.1fms",
+                            context->audioFrameMs, context->audioBytesPerSample, context->audioMaxDriftMs);
+    } else {
+        SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL", "Audio pacing disabled (wall-clock PTS)");
+    }
+}
+
+uint64_t SS4S_NDL_webOS5_NextAudioPts(SS4S_PlayerContext *context, size_t size) {
+    uint64_t wall = SS4S_NDL_webOS5_GetPts(context);
+    if (!context->audioPacing) {
+        return wall;
+    }
+
+    /* PCM carries its own duration; compressed packets fall back to the configured frame size. */
+    double durationMs = context->audioFrameMs;
+    if (context->audioBytesPerSample > 0 && size >= (size_t) context->audioBytesPerSample) {
+        durationMs = (double) (size / (size_t) context->audioBytesPerSample) * 1000.0 / context->audioSampleRate;
+    }
+    if (durationMs <= 0) {
+        durationMs = context->audioFrameMs;
+    }
+
+    if (!context->audioPtsInitialized) {
+        context->audioNextPtsMs = (double) wall;
+        context->audioPtsInitialized = true;
+        context->audioStatsLastLogMs = wall;
+    }
+
+    double pts = context->audioNextPtsMs;
+    double lead = pts - (double) wall;
+    if (lead < -context->audioMaxDriftMs || lead > context->audioMaxDriftMs) {
+        context->audioReanchors++;
+        pts = (double) wall;
+        lead = 0;
+    }
+    context->audioNextPtsMs = pts + durationMs;
+
+    if (context->audioFedPackets == 0 || lead < context->audioLeadMinMs) {
+        context->audioLeadMinMs = lead;
+    }
+    if (context->audioFedPackets == 0 || lead > context->audioLeadMaxMs) {
+        context->audioLeadMaxMs = lead;
+    }
+    context->audioFedPackets++;
+
+    if (wall - context->audioStatsLastLogMs >= 30000) {
+        SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL",
+                            "Audio pacing: %u packets, jitter absorbed %.1f..%.1fms, %u re-anchors",
+                            context->audioFedPackets, context->audioLeadMinMs, context->audioLeadMaxMs,
+                            context->audioReanchors);
+        context->audioStatsLastLogMs = wall;
+        context->audioFedPackets = 0;
+        context->audioReanchors = 0;
+    }
+
+    return (uint64_t) (pts + 0.5);
 }
 
 uint64_t SS4S_NDL_webOS5_NextVideoPts(SS4S_PlayerContext *context, int64_t hostPtsUs) {
@@ -226,6 +337,9 @@ static int LoadMedia(SS4S_PlayerContext *context) {
     context->hostPtsAnchorUs = 0;
     context->hostPtsPlayerAnchorMs = 0;
     context->lastFrameTime = 0;
+    /* mediaLoadedTime is the PTS epoch, so the audio timeline restarts with it. */
+    context->audioPtsInitialized = false;
+    context->audioNextPtsMs = 0;
     return ret;
 }
 

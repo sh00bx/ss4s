@@ -32,6 +32,20 @@ struct SS4S_PlayerContext {
     bool hostPtsAnchored;
     int64_t hostPtsAnchorUs;
     double hostPtsPlayerAnchorMs;
+    /* Sample-clock audio pacing (virtual audio timeline). */
+    bool audioPacing;
+    bool audioPtsInitialized;
+    double audioNextPtsMs;
+    double audioMaxDriftMs;
+    double audioSampleRate;
+    double audioFrameMs;
+    int audioBytesPerSample;
+    /* Audio pacing telemetry, logged periodically. */
+    uint64_t audioStatsLastLogMs;
+    uint32_t audioFedPackets;
+    uint32_t audioReanchors;
+    double audioLeadMinMs;
+    double audioLeadMaxMs;
 };
 
 extern const SS4S_PlayerDriver SS4S_NDL_webOS5_PlayerDriver;
@@ -48,6 +62,13 @@ uint64_t SS4S_NDL_webOS5_GetPts(const SS4S_PlayerContext *context);
 uint64_t SS4S_NDL_webOS5_NextVideoPts(SS4S_PlayerContext *context, int64_t hostPtsUs);
 
 void SS4S_NDL_webOS5_ConfigureSmoothPacing(SS4S_PlayerContext *context, int fpsNum, int fpsDen);
+
+/** Configure the virtual audio timeline. bytesPerSample is 0 for compressed codecs. */
+void SS4S_NDL_webOS5_ConfigureAudioPacing(SS4S_PlayerContext *context, int sampleRate, int samplesPerFrame,
+                                          int bytesPerSample);
+
+/** Audio PTS advanced by the fed sample count instead of packet arrival time. */
+uint64_t SS4S_NDL_webOS5_NextAudioPts(SS4S_PlayerContext *context, size_t size);
 
 int SS4S_NDL_webOS5_Driver_PostInit(int argc, char *argv[]);
 
