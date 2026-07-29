@@ -134,8 +134,10 @@ void SS4S_NDL_webOS5_ConfigureAudioPacing(SS4S_PlayerContext *context, int sampl
     context->audioStatsLastLogMs = 0;
     context->audioFedPackets = 0;
     context->audioReanchors = 0;
+    context->audioConcealed = 0;
     context->audioLeadMinMs = 0;
     context->audioLeadMaxMs = 0;
+    context->audioMaxExcursionMs = 0;
 
     /*
      * Arrival jitter above this band is treated as a genuine timeline break (long stall, whole
@@ -184,6 +186,12 @@ uint64_t SS4S_NDL_webOS5_NextAudioPts(SS4S_PlayerContext *context, size_t size) 
     double pts = context->audioNextPtsMs;
     double lead = pts - (double) wall;
     if (lead < -context->audioMaxDriftMs || lead > context->audioMaxDriftMs) {
+        /* Sample the excursion before it is discarded, otherwise the lead min/max below
+         * only ever record in-band values and the log understates what went wrong. */
+        double excursion = lead < 0 ? -lead : lead;
+        if (excursion > context->audioMaxExcursionMs) {
+            context->audioMaxExcursionMs = excursion;
+        }
         context->audioReanchors++;
         pts = (double) wall;
         lead = 0;
@@ -200,15 +208,54 @@ uint64_t SS4S_NDL_webOS5_NextAudioPts(SS4S_PlayerContext *context, size_t size) 
 
     if (wall - context->audioStatsLastLogMs >= 30000) {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL",
-                            "Audio pacing: %u packets, jitter absorbed %.1f..%.1fms, %u re-anchors",
+                            "Audio pacing: %u packets, jitter absorbed %.1f..%.1fms, %u re-anchors "
+                            "(max excursion %.1fms), %u concealed",
                             context->audioFedPackets, context->audioLeadMinMs, context->audioLeadMaxMs,
-                            context->audioReanchors);
+                            context->audioReanchors, context->audioMaxExcursionMs, context->audioConcealed);
         context->audioStatsLastLogMs = wall;
         context->audioFedPackets = 0;
         context->audioReanchors = 0;
+        context->audioConcealed = 0;
+        context->audioMaxExcursionMs = 0;
     }
 
     return (uint64_t) (pts + 0.5);
+}
+
+typedef struct {
+    SS4S_PlayerContext *context;
+    bool fed;
+} OpusConcealArg;
+
+static int OpusFeedConcealed(void *arg, const unsigned char *data, size_t size) {
+    OpusConcealArg *conceal = arg;
+    /*
+     * Route the silent frame through the paced clock rather than the wall clock. The virtual
+     * timeline only advances on packets we actually feed, so skipping a lost packet would pull
+     * every later PTS one frame earlier and let audio creep ahead of video until a re-anchor
+     * snaps it back.
+     */
+    uint64_t pts = SS4S_NDL_webOS5_NextAudioPts(conceal->context, size);
+    int rc = NDL_DirectAudioPlay((void *) data, size, (long long) pts);
+    if (rc == 0) {
+        conceal->fed = true;
+    }
+    return rc;
+}
+
+bool SS4S_NDL_webOS5_ConcealAudioFrame(SS4S_PlayerContext *context) {
+    if (context->opusEmpty == NULL) {
+        return false;
+    }
+    /* SS4S_OpusEmptyFeed returns 0 both on success and when the channel layout has no
+     * pre-baked frame, so track the actual feed through the callback. */
+    OpusConcealArg conceal = {.context = context, .fed = false};
+    SS4S_OpusEmptyFeed(context->opusEmpty, OpusFeedConcealed, &conceal);
+    if (!conceal.fed) {
+        return false;
+    }
+    context->audioConcealed++;
+    return true;
 }
 
 uint64_t SS4S_NDL_webOS5_NextVideoPts(SS4S_PlayerContext *context, int64_t hostPtsUs) {

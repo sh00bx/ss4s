@@ -44,8 +44,13 @@ struct SS4S_PlayerContext {
     uint64_t audioStatsLastLogMs;
     uint32_t audioFedPackets;
     uint32_t audioReanchors;
+    uint32_t audioConcealed;
     double audioLeadMinMs;
     double audioLeadMaxMs;
+    /* Largest out-of-band lead seen since the last log, sampled before the re-anchor
+     * resets it. Without this the lead min/max only ever show in-band values, so the
+     * excursions that actually trigger re-anchors are invisible. */
+    double audioMaxExcursionMs;
 };
 
 extern const SS4S_PlayerDriver SS4S_NDL_webOS5_PlayerDriver;
@@ -69,6 +74,10 @@ void SS4S_NDL_webOS5_ConfigureAudioPacing(SS4S_PlayerContext *context, int sampl
 
 /** Audio PTS advanced by the fed sample count instead of packet arrival time. */
 uint64_t SS4S_NDL_webOS5_NextAudioPts(SS4S_PlayerContext *context, size_t size);
+
+/* Substitutes one silent Opus frame for a packet the network lost. Returns true if a
+ * frame was fed. */
+bool SS4S_NDL_webOS5_ConcealAudioFrame(SS4S_PlayerContext *context);
 
 int SS4S_NDL_webOS5_Driver_PostInit(int argc, char *argv[]);
 
