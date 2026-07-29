@@ -134,6 +134,16 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
         pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
         return SS4S_AUDIO_FEED_NOT_READY;
     }
+    if (data == NULL || size == 0) {
+        /*
+         * Lost-packet placeholder. On the Opus passthrough path NDL owns the decoder, so
+         * libopus concealment is out of reach and feeding nothing leaves a hole in the
+         * timeline. Substitute a silent frame instead.
+         */
+        bool concealed = SS4S_NDL_webOS5_ConcealAudioFrame(context);
+        pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
+        return concealed ? SS4S_AUDIO_FEED_OK : SS4S_AUDIO_FEED_NOT_READY;
+    }
     int rc;
     if (context->opusFix) {
         int fixedSize = SS4S_NDLOpusFixProcess(context->opusFix, data, size);

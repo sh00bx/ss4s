@@ -65,6 +65,10 @@ static void AudioClose(SS4S_AudioInstance *instance) {
 }
 
 static SS4S_AudioFeedResult AudioFeed(SS4S_AudioInstance *instance, const unsigned char *data, size_t size) {
+    if (data == NULL || size == 0) {
+        /* Lost-packet placeholder; this backend has no concealment frame to substitute. */
+        return SS4S_AUDIO_FEED_NOT_READY;
+    }
     switch (StarfishPlayerFeed((SS4S_PlayerContext *) instance, data, size, 2)) {
         case SMP_FEED_OK:
             return SS4S_AUDIO_FEED_OK;

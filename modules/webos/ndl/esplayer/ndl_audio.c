@@ -60,6 +60,10 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
     if (!context->mediaLoaded) {
         return SS4S_AUDIO_FEED_NOT_READY;
     }
+    if (data == NULL || size == 0) {
+        /* Lost-packet placeholder; this backend has no concealment frame to substitute. */
+        return SS4S_AUDIO_FEED_NOT_READY;
+    }
     NDL_ESP_STREAM_BUFFER buff = {
             .data = (uint8_t *) data,
             .data_len = size,
