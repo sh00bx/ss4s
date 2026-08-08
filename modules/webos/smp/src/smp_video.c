@@ -160,7 +160,24 @@ static bool SetHDRInfo(SS4S_VideoInstance *instance, const SS4S_VideoHDRInfo *in
 }
 
 static bool SetDisplayArea(SS4S_VideoInstance *ctx, const SS4S_VideoRect *src, const SS4S_VideoRect *dst) {
+    (void) ctx;
+    (void) src;
+    (void) dst;
     return true;
+}
+
+static bool GetVideoRenderQueueLength(SS4S_VideoInstance *instance, int *length) {
+    if (instance == NULL || length == NULL) {
+        return false;
+    }
+    SS4S_PlayerContext *ctx = (SS4S_PlayerContext *) instance;
+    StarfishPlayerLock(ctx);
+    bool ok = false;
+    if (ctx->api != NULL) {
+        ok = StarfishMediaAPIs_getVideoRenderQueueLength(ctx->api, length);
+    }
+    StarfishPlayerUnlock(ctx);
+    return ok;
 }
 
 const SS4S_VideoDriver StarfishVideoDriver = {
@@ -172,5 +189,6 @@ const SS4S_VideoDriver StarfishVideoDriver = {
         .SizeChanged = SizeChanged,
         .SetHDRInfo = SetHDRInfo,
         .SetDisplayArea = SetDisplayArea,
+        .GetVideoRenderQueueLength = GetVideoRenderQueueLength,
         .Close = VideoClose,
 };

@@ -74,6 +74,8 @@ bool StarfishMediaAPIs_setHdrInfo(StarfishMediaAPIs_C *api, const char *message)
 
 bool StarfishMediaAPIs_getAudioBufferSize(StarfishMediaAPIs_C *api, int *total, int *used);
 
+bool StarfishMediaAPIs_getVideoRenderQueueLength(StarfishMediaAPIs_C *api, int *length);
+
 bool StarfishMediaAPIs_unload(StarfishMediaAPIs_C *api);
 
 void StarfishMediaAPIs_destroy(StarfishMediaAPIs_C *api);

@@ -123,6 +123,12 @@ typedef struct SS4S_VideoDriver {
 
     bool (*SetDisplayArea)(SS4S_VideoInstance *instance, const SS4S_VideoRect *src, const SS4S_VideoRect *dst);
 
+    /**
+     * Optional. Read current video render-queue depth from the backend (e.g. Starfish).
+     * @return true if length was written; false if unsupported or unavailable
+     */
+    bool (*GetVideoRenderQueueLength)(SS4S_VideoInstance *instance, int *length);
+
     void (*Close)(SS4S_VideoInstance *instance);
 } SS4S_VideoDriver;
 

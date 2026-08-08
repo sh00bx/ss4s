@@ -127,6 +127,23 @@ bool SS4S_PlayerVideoSetDisplayArea(SS4S_Player *player, const SS4S_VideoRect *s
     return result;
 }
 
+bool SS4S_PlayerGetVideoRenderQueueLength(SS4S_Player *player, int *length) {
+    if (player == NULL || length == NULL) {
+        return false;
+    }
+    SS4S_VideoInstance *video = SS4S_FeedGuardAcquire(&player->video_guard);
+    if (video == NULL) {
+        return false;
+    }
+    const SS4S_VideoDriver *driver = SS4S_GetVideoDriver();
+    bool result = false;
+    if (driver != NULL && driver->GetVideoRenderQueueLength != NULL) {
+        result = driver->GetVideoRenderQueueLength(video, length);
+    }
+    SS4S_FeedGuardRelease(&player->video_guard);
+    return result;
+}
+
 bool SS4S_PlayerVideoClose(SS4S_Player *player) {
     SS4S_VideoInstance *video = SS4S_FeedGuardClose(&player->video_guard);
     if (video == NULL) {

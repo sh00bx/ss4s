@@ -49,6 +49,12 @@ void *SS4S_PlayerGetUserdata(SS4S_Player *player);
 
 bool SS4S_PlayerGetVideoLatency(SS4S_Player *player, int avgIntervalUs, int *latencyUs);
 
+/**
+ * Optional backend render-queue depth (e.g. Starfish getVideoRenderQueueLength).
+ * @return false if the active video driver does not support the query
+ */
+bool SS4S_PlayerGetVideoRenderQueueLength(SS4S_Player *player, int *length);
+
 #ifdef __cplusplus
 }
 #endif

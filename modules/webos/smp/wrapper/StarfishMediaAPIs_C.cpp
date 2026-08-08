@@ -8,6 +8,8 @@ extern "C" bool
 _ZN17StarfishMediaAPIs10setHdrInfoEPKc(StarfishMediaAPIs *api, const char *message) __attribute__((weak));
 extern "C" bool
 _ZN17StarfishMediaAPIs18getAudioBufferSizeERiS0_(StarfishMediaAPIs *api, int *total, int *used) __attribute__((weak));
+extern "C" bool
+_ZN17StarfishMediaAPIs26getVideoRenderQueueLengthERi(StarfishMediaAPIs *api, int *length) __attribute__((weak));
 #pragma clang diagnostic pop
 
 extern "C" {
@@ -69,6 +71,13 @@ bool StarfishMediaAPIs_getAudioBufferSize(StarfishMediaAPIs_C *api, int *total, 
         return false;
     }
     return _ZN17StarfishMediaAPIs18getAudioBufferSizeERiS0_(&api->inner, total, used);
+}
+
+bool StarfishMediaAPIs_getVideoRenderQueueLength(StarfishMediaAPIs_C *api, int *length) {
+    if (_ZN17StarfishMediaAPIs26getVideoRenderQueueLengthERi == nullptr || length == nullptr) {
+        return false;
+    }
+    return _ZN17StarfishMediaAPIs26getVideoRenderQueueLengthERi(&api->inner, length);
 }
 
 bool StarfishMediaAPIs_unload(StarfishMediaAPIs_C *api) {

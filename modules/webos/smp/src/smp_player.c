@@ -211,6 +211,19 @@ static bool SmoothPacingEnvEnabled(void) {
     return true;
 }
 
+static bool PauseAtDecodeTimeEnvEnabled(void) {
+    const char *env = getenv("SS4S_PAUSE_AT_DECODE_TIME");
+    /* Default ON (historical Starfish Load behavior) unless explicitly disabled. */
+    if (env == NULL || env[0] == '\0') {
+        return true;
+    }
+    if (env[0] == '0' || strcmp(env, "false") == 0 || strcmp(env, "off") == 0 ||
+        strcmp(env, "FALSE") == 0 || strcmp(env, "OFF") == 0) {
+        return false;
+    }
+    return true;
+}
+
 static const char *SmoothPacingIntervalEnv(void) {
     const char *env = getenv("SS4S_SMOOTH_PACING_INTERVAL_US");
     if (env != NULL && env[0] != '\0') {
@@ -445,11 +458,14 @@ jvalue_ref MakeLoadPayload(SS4S_PlayerContext *ctx, const SS4S_AudioInfo *audioI
             return NULL;
         }
     }
+    const bool pauseAtDecodeTime = PauseAtDecodeTimeEnvEnabled();
+    StarfishLibContext->Log(SS4S_LogLevelInfo, "SMP", "pauseAtDecodeTime=%s",
+                            pauseAtDecodeTime ? "true" : "false");
     jvalue_ref codec = jobject_create();
     jvalue_ref contents = jobject_create_var(
         jkeyval(J_CSTR_TO_JVAL("codec"), codec),
         jkeyval(J_CSTR_TO_JVAL("esInfo"), jobject_create_var(
-            jkeyval(J_CSTR_TO_JVAL("pauseAtDecodeTime"), jboolean_create(true)),
+            jkeyval(J_CSTR_TO_JVAL("pauseAtDecodeTime"), jboolean_create(pauseAtDecodeTime)),
             jkeyval(J_CSTR_TO_JVAL("ptsToDecode"), jnumber_create_i64(0)),
             jkeyval(J_CSTR_TO_JVAL("seperatedPTS"), jboolean_true()),
             J_END_OBJ_DECL
