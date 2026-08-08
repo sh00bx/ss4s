@@ -39,6 +39,16 @@ static bool GetCapabilities(SS4S_AudioCapabilities *capabilities, SS4S_AudioCode
 }
 
 static SS4S_AudioCodec GetPreferredCodecs(const SS4S_AudioInfo *info) {
+    /*
+     * Prefer PCM for 5.1 wherever the platform can take it (webOS 7+). NDL's Opus
+     * passthrough only accepts the channel mapping {0,1,4,5,2,3}; anything else lands in
+     * the opus_fix re-encode path, which decodes and re-encodes every single frame and
+     * drops out audibly while doing it. On the PCM path that whole class of mismatch
+     * cannot arise, at the cost of decoding client-side. Stereo already preferred PCM.
+     */
+    if (info->numOfChannels == 6 && SupportsPCM6Channel) {
+        return SS4S_AUDIO_PCM_S16LE;
+    }
     if (info->numOfChannels == 6) {
         return SS4S_AUDIO_OPUS;
     }
