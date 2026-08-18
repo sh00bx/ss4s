@@ -1,4 +1,5 @@
 #include "ndl_common.h"
+#include "../../common/aurora_frame_diag.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -328,6 +329,7 @@ static int UnloadMedia(SS4S_PlayerContext *context) {
     if (context->mediaLoaded) {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL", "Unloading media");
         context->mediaLoaded = false;
+        AuroraFrameDiagEndSession();
         ret = NDL_DirectMediaUnload();
     }
     return ret;
@@ -377,6 +379,7 @@ static int LoadMedia(SS4S_PlayerContext *context) {
     }
 
     context->mediaLoaded = true;
+    AuroraFrameDiagBeginSession("ndl");
     clock_gettime(CLOCK_MONOTONIC, &context->mediaLoadedTime);
     context->smoothPtsInitialized = false;
     context->smoothLastPts = 0;
@@ -391,6 +394,8 @@ static int LoadMedia(SS4S_PlayerContext *context) {
 }
 
 static void LoadCallback(int type, long long numValue, const char *strValue) {
+    /* Observation only; no-op unless /tmp/aurora_frame_diag.enable (or env) is set. */
+    AuroraFrameDiagLogEvent(type, numValue, strValue);
     switch (type) {
         case 0x16: {
             SS4S_NDL_webOS5_Log(SS4S_LogLevelInfo, "NDL", "%s STATE_UPDATE_LOADCOMPLETED: %s", __FUNCTION__, strValue);
