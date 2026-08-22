@@ -46,6 +46,14 @@ struct SS4S_PlayerContext {
     int64_t hostPtsAnchorUs;
     double hostPtsPlayerAnchorNs;
 
+    /* Scratch for the 5.1 PCM channel remap in smp_audio.c, owned for the whole audio
+     * session so the feed path never has to allocate. Guarded by `lock` on every path that
+     * touches it — open, feed and close — because the feed hands the buffer itself to the
+     * decoder and must not have it resized or freed underneath. */
+    int16_t *audioRemapBuffer;
+    size_t audioRemapCapacity;
+    bool audioRemapWarned;
+
     struct StarfishMediaAPIs_C *api;
     struct StarfishResource *res;
 
@@ -59,6 +67,13 @@ bool StarfishPlayerLoadInner(SS4S_PlayerContext *ctx);
 bool StarfishPlayerUnloadInner(SS4S_PlayerContext *ctx);
 
 FeedResult StarfishPlayerFeed(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int esData);
+
+/**
+ * Same as StarfishPlayerFeed for esData != 1, but the caller holds the player lock. A caller
+ * that hands over a buffer living in the player context needs the lock to span filling that
+ * buffer and the feed that reads it, which it cannot do through the locking variant.
+ */
+FeedResult StarfishPlayerFeedLocked(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int esData);
 
 FeedResult StarfishPlayerFeedVideo(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int64_t hostPtsUs);
 

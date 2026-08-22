@@ -51,6 +51,13 @@ struct SS4S_PlayerContext {
      * resets it. Without this the lead min/max only ever show in-band values, so the
      * excursions that actually trigger re-anchors are invisible. */
     double audioMaxExcursionMs;
+    /* Scratch for the 5.1 PCM channel remap, owned for the whole audio session. A
+     * per-frame malloc here would hand the sink the untouched SDL/Vorbis order on every
+     * allocation that fails, and nothing downstream can tell that apart from correct
+     * audio. */
+    int16_t *audioRemapBuffer;
+    size_t audioRemapCapacity;
+    bool audioRemapWarned;
 };
 
 extern const SS4S_PlayerDriver SS4S_NDL_webOS5_PlayerDriver;

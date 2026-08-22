@@ -60,6 +60,11 @@ static void DestroyPlayer(SS4S_PlayerContext *context) {
     }
     StarfishResourceDestroy(context->res);
     free(context->appId);
+    /* SS4S_PlayerClose does not close audio, so a player torn down without a matching
+     * AudioClose would otherwise take the remap scratch with it. */
+    free(context->audioRemapBuffer);
+    context->audioRemapBuffer = NULL;
+    context->audioRemapCapacity = 0;
     pthread_mutex_unlock(&context->lock);
     pthread_mutex_destroy(&context->lock);
     free(context);
@@ -118,21 +123,14 @@ bool StarfishPlayerUnloadInner(SS4S_PlayerContext *ctx) {
     return true;
 }
 
-FeedResult StarfishPlayerFeed(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int esData) {
-    if (esData == 1) {
-        return StarfishPlayerFeedVideo(ctx, data, size, -1);
-    }
-    StarfishPlayerLock(ctx);
+FeedResult StarfishPlayerFeedLocked(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int esData) {
     if (ctx->state == SMP_STATE_UNLOADED && ctx->waitAudioVideoReady) {
-        StarfishPlayerUnlock(ctx);
         return SMP_FEED_OK;
     }
     if (ctx->shouldStop) {
-        StarfishPlayerUnlock(ctx);
         return SMP_FEED_ERROR;
     }
     if (ctx->state == SMP_STATE_UNLOADED) {
-        StarfishPlayerUnlock(ctx);
         return SMP_FEED_NOT_READY;
     }
     char payload[256], result[256];
@@ -141,7 +139,6 @@ FeedResult StarfishPlayerFeed(SS4S_PlayerContext *ctx, const unsigned char *data
              data, size, diff, esData);
     StarfishMediaAPIs_feed(ctx->api, payload, result, 256);
     if (strstr(result, "Ok") == NULL) {
-        StarfishPlayerUnlock(ctx);
         if (strstr(result, "BufferFull") != NULL) {
             return SMP_FEED_BUFFER_FULL;
         }
@@ -151,8 +148,17 @@ FeedResult StarfishPlayerFeed(SS4S_PlayerContext *ctx, const unsigned char *data
         ctx->state = SMP_STATE_PLAYING;
         StarfishResourceStartPlaying(ctx->res);
     }
-    StarfishPlayerUnlock(ctx);
     return SMP_FEED_OK;
+}
+
+FeedResult StarfishPlayerFeed(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int esData) {
+    if (esData == 1) {
+        return StarfishPlayerFeedVideo(ctx, data, size, -1);
+    }
+    StarfishPlayerLock(ctx);
+    FeedResult result = StarfishPlayerFeedLocked(ctx, data, size, esData);
+    StarfishPlayerUnlock(ctx);
+    return result;
 }
 
 FeedResult StarfishPlayerFeedVideo(SS4S_PlayerContext *ctx, const unsigned char *data, size_t size, int64_t hostPtsUs) {

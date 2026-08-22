@@ -315,6 +315,11 @@ static SS4S_PlayerContext *CreatePlayerContext(SS4S_Player *player) {
 
 static void DestroyPlayerContext(SS4S_PlayerContext *context) {
     UnloadMedia(context);
+    /* SS4S_PlayerClose does not close audio, so a player torn down without an
+     * AudioClose would take the 5.1 remap scratch with it. CloseAudio NULLs the
+     * pointer, so the ordinary path frees NULL here. */
+    free(context->audioRemapBuffer);
+    context->audioRemapBuffer = NULL;
     free(context);
     assert(context == ActivatePlayerContext);
     ActivatePlayerContext = NULL;

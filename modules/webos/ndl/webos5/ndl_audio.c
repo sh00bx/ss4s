@@ -15,6 +15,24 @@ static bool ParseOpusConfig(const unsigned char *codecData, size_t codecDataLen,
 
 static int SupportsPCM6Channel = 0;
 
+/*
+ * Grows the session-owned 5.1 remap scratch. Reserved in OpenAudio so the feed path only
+ * ever hits the fast return; it still grows on demand because samplesPerFrame is what the
+ * host announced, not a guarantee about the size of any single packet.
+ */
+static bool EnsureRemapBuffer(SS4S_PlayerContext *context, size_t size) {
+    if (context->audioRemapCapacity >= size) {
+        return true;
+    }
+    int16_t *grown = realloc(context->audioRemapBuffer, size);
+    if (grown == NULL) {
+        return false;
+    }
+    context->audioRemapBuffer = grown;
+    context->audioRemapCapacity = size;
+    return true;
+}
+
 static int DriverInit(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -71,6 +89,11 @@ static SS4S_AudioOpenResult OpenAudio(const SS4S_AudioInfo *info, SS4S_AudioInst
             } else if (info->numOfChannels == 6) {
                 if (SupportsPCM6Channel) {
                     mode = "6-channel";
+                    context->audioRemapWarned = false;
+                    if (info->samplesPerFrame > 0 &&
+                        !EnsureRemapBuffer(context, (size_t) info->samplesPerFrame * 6 * sizeof(int16_t))) {
+                        SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "Could not reserve the 5.1 remap buffer");
+                    }
                 } else {
                     SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "6-channel PCM is not supported, "
                                                                   "falling back to stereo");
@@ -157,7 +180,6 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
         pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
         return concealed ? SS4S_AUDIO_FEED_OK : SS4S_AUDIO_FEED_NOT_READY;
     }
-    int16_t *remap_owned = NULL;
     if (context->opusFix) {
         int fixedSize = SS4S_NDLOpusFixProcess(context->opusFix, data, size);
         if (fixedSize < 0) {
@@ -175,16 +197,24 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
          * device order in webos_pcm_51_remap.h (validated on-device upstream,
          * issue #60). Only ever active without surroundParams — sending those
          * too would remap twice. */
-        int frames = (int) (size / (6 * sizeof(int16_t)));
-        remap_owned = malloc(size);
-        if (remap_owned != NULL) {
-            SS4S_WebOS_RemapPcm51ToDevice((const int16_t *) data, remap_owned, frames);
-            data = (const unsigned char *) remap_owned;
+        if (!EnsureRemapBuffer(context, size)) {
+            /* Playing the frame unremapped would put centre and surround on the wrong
+             * speakers for exactly this frame and leave no trace of it. Reject it instead;
+             * the session counts and logs rejected audio feeds. */
+            if (!context->audioRemapWarned) {
+                context->audioRemapWarned = true;
+                SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "No 5.1 remap buffer for %u bytes, dropping frames",
+                                    (unsigned) size);
+            }
+            pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
+            return SS4S_AUDIO_FEED_ERROR;
         }
+        int frames = (int) (size / (6 * sizeof(int16_t)));
+        SS4S_WebOS_RemapPcm51ToDevice((const int16_t *) data, context->audioRemapBuffer, frames);
+        data = (const unsigned char *) context->audioRemapBuffer;
     }
     uint64_t pts = SS4S_NDL_webOS5_NextAudioPts(context, size);
     int rc = NDL_DirectAudioPlay((void *) data, size, (long long) pts);
-    free(remap_owned);
     if (rc != 0) {
         SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "NDL_DirectAudioPlay returned %d: %s", rc,
                             NDL_DirectMediaGetError());
@@ -208,6 +238,9 @@ static void CloseAudio(SS4S_AudioInstance *instance) {
         SS4S_OpusEmptyDestroy(context->opusEmpty);
         context->opusEmpty = NULL;
     }
+    free(context->audioRemapBuffer);
+    context->audioRemapBuffer = NULL;
+    context->audioRemapCapacity = 0;
     SS4S_NDL_webOS5_UnloadMedia(context);
     pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
 }

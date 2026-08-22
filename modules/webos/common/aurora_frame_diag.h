@@ -12,6 +12,16 @@ extern "C" {
  *
  * Enable at runtime: AURORA_FRAME_DIAG=1
  * Log path:         AURORA_FRAME_DIAG_PATH=/tmp/aurora_frame_diag.ndjson  (default)
+ * Size cap:         AURORA_FRAME_DIAG_MAX_BYTES=16777216  (default, 0 = unbounded)
+ *
+ * The file is truncated once, at the first session of the process, and appended to from
+ * then on: media reloads and stream restarts are the events the log has to explain, so
+ * nothing that happens during a run may drop what was recorded before it. What bounds the
+ * file is the size cap — /tmp is RAM on this TV — and reaching it is written into the log
+ * as a `log_capped` record rather than the file simply going quiet.
+ *
+ * Every record carries `session`, which counts sessions within the process; `frame`
+ * restarts at 0 with each session and is only meaningful together with it.
  *
  * When disabled, all calls are cheap no-ops (one atomic load).
  * Does not change PTS pacing, pauseAtDecodeTime, or feed cadence logic.
