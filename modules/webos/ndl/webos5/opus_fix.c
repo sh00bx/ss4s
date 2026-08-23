@@ -36,6 +36,18 @@ SS4S_NDLOpusFix *SS4S_NDLOpusFixCreate(const OpusConfig *config) {
         SS4S_NDLOpusFixDestroy(instance);
         return NULL;
     }
+    /*
+     * This re-encode runs 100-200 times a second on a SoC that is already saturated by 4K
+     * receive, and the only reason it exists is to put the channels in an order NDL accepts.
+     * At default complexity it costs enough CPU to become audible as dropouts (upstream
+     * aurora-tv #59/#66). Complexity 0 at a high constant bitrate keeps it cheap and, at
+     * 512 kbit for six channels, effectively transparent -- quality is not what this stage
+     * is for.
+     */
+    opus_multistream_encoder_ctl(instance->encoder, OPUS_SET_COMPLEXITY(0));
+    opus_multistream_encoder_ctl(instance->encoder, OPUS_SET_BITRATE(512000));
+    opus_multistream_encoder_ctl(instance->encoder, OPUS_SET_VBR(0));
+    opus_multistream_encoder_ctl(instance->encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
     return instance;
 }
 

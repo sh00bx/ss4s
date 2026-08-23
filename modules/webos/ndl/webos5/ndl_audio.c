@@ -164,27 +164,43 @@ static SS4S_AudioOpenResult OpenAudio(const SS4S_AudioInfo *info, SS4S_AudioInst
 }
 
 static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsigned char *data, size_t size) {
-    pthread_mutex_lock(&SS4S_NDL_webOS5_Lock);
     SS4S_PlayerContext *context = (void *) instance;
+    /*
+     * Cheap early-out. This read can go stale, so it is not the authoritative check -- that
+     * one happens again under the lock, just before the frame reaches NDL. It only spares us
+     * a transcode for a player that is already gone.
+     */
     if (!context->mediaLoaded) {
-        pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
         return SS4S_AUDIO_FEED_NOT_READY;
     }
     if (data == NULL || size == 0) {
         /*
          * Lost-packet placeholder. On the Opus passthrough path NDL owns the decoder, so
          * libopus concealment is out of reach and feeding nothing leaves a hole in the
-         * timeline. Substitute a silent frame instead.
+         * timeline. Substitute a silent frame instead. This one does touch NDL, so it keeps
+         * the lock.
          */
+        pthread_mutex_lock(&SS4S_NDL_webOS5_Lock);
+        if (!context->mediaLoaded) {
+            pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
+            return SS4S_AUDIO_FEED_NOT_READY;
+        }
         bool concealed = SS4S_NDL_webOS5_ConcealAudioFrame(context);
         pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
         return concealed ? SS4S_AUDIO_FEED_OK : SS4S_AUDIO_FEED_NOT_READY;
     }
+    /*
+     * Everything from here to the lock is this instance's own work on this instance's own
+     * buffers: the Opus re-encode, or the 5.1 channel remap. It used to run with
+     * SS4S_NDL_webOS5_Lock held, which blocked the video feed for the whole duration of an
+     * encode -- a 200 Hz re-encode on a SoC already saturated by 4K receive is not a short
+     * hold. Limelight joins the audio threads before the player is closed, so the context and
+     * its buffers stay alive across this window without the lock.
+     */
     if (context->opusFix) {
         int fixedSize = SS4S_NDLOpusFixProcess(context->opusFix, data, size);
         if (fixedSize < 0) {
             SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "SS4S_NDLOpusFixProcess returned %d", fixedSize);
-            pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
             return SS4S_AUDIO_FEED_ERROR;
         }
         data = SS4S_NDLOpusFixGetBuffer(context->opusFix);
@@ -206,12 +222,17 @@ static SS4S_AudioFeedResult FeedAudio(SS4S_AudioInstance *instance, const unsign
                 SS4S_NDL_webOS5_Log(SS4S_LogLevelWarn, "NDL", "No 5.1 remap buffer for %u bytes, dropping frames",
                                     (unsigned) size);
             }
-            pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
             return SS4S_AUDIO_FEED_ERROR;
         }
         int frames = (int) (size / (6 * sizeof(int16_t)));
         SS4S_WebOS_RemapPcm51ToDevice((const int16_t *) data, context->audioRemapBuffer, frames);
         data = (const unsigned char *) context->audioRemapBuffer;
+    }
+    pthread_mutex_lock(&SS4S_NDL_webOS5_Lock);
+    /* Authoritative check: the player may have been unloaded while we were transcoding. */
+    if (!context->mediaLoaded) {
+        pthread_mutex_unlock(&SS4S_NDL_webOS5_Lock);
+        return SS4S_AUDIO_FEED_NOT_READY;
     }
     uint64_t pts = SS4S_NDL_webOS5_NextAudioPts(context, size);
     int rc = NDL_DirectAudioPlay((void *) data, size, (long long) pts);
