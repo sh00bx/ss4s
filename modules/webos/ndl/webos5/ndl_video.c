@@ -103,9 +103,16 @@ static SS4S_VideoFeedResult FeedVideoWithPTS(SS4S_VideoInstance *instance, const
     uint64_t now = GetTimeUs();
     int renderBufferLength = 0;
     if (context->lastFrameTime > 0 && NDL_DirectVideoGetRenderBufferLength(&renderBufferLength) == 0) {
+        /* Queue depth × the nominal frame period, not the inter-arrival gap: the gap
+         * jitters with the network, so the estimate used to flap between 1× and 2×
+         * the frame time even while the queue held steady. With a constant period the
+         * averaged samples read as fractional queue occupancy instead. */
         float bufLen = renderBufferLength > 0 ? (float) renderBufferLength : 0.5f;
-        float latency = bufLen * (float) (now - context->lastFrameTime);
-        SS4S_NDL_webOS5_Lib->VideoStats.ReportFrame(context->player, (int) latency);
+        float intervalUs = (float) (context->smoothIntervalMs * 1000.0);
+        if (intervalUs <= 0) {
+            intervalUs = (float) (now - context->lastFrameTime);
+        }
+        SS4S_NDL_webOS5_Lib->VideoStats.ReportFrame(context->player, (int) (bufLen * intervalUs));
     }
     context->lastFrameTime = now;
     return SS4S_VIDEO_FEED_OK;
