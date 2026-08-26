@@ -204,6 +204,32 @@ static uint64_t GetTimeUs() {
     return (uint64_t) ts.tv_sec * 1000000 + (uint64_t) ts.tv_nsec / 1000;
 }
 
+/* The display pipeline's queue depth, as NDL reports it. The feed path above
+ * already reads this per frame for its latency estimate; exposing it through the
+ * generic entry point is what lets the app tell "the decoder keeps up" from
+ * "frames are piling up undisplayed". Submitted-frame counters cannot make that
+ * distinction: they count what we handed over, not what reached the panel.
+ *
+ * No lock, deliberately. FeedVideoWithPTS calls the same NDL entry point on the
+ * feed thread without one, and the instance itself is already held alive by the
+ * caller's feed guard — taking SS4S_NDL_webOS5_Lock here would put a stats read
+ * in the way of the audio feed for no lifetime we do not already have. */
+static bool GetVideoRenderQueueLength(SS4S_VideoInstance *instance, int *length) {
+    if (instance == NULL || length == NULL) {
+        return false;
+    }
+    SS4S_PlayerContext *context = (SS4S_PlayerContext *) instance;
+    if (!context->mediaLoaded) {
+        return false;
+    }
+    int len = 0;
+    if (NDL_DirectVideoGetRenderBufferLength(&len) != 0) {
+        return false;
+    }
+    *length = len;
+    return true;
+}
+
 const SS4S_VideoDriver SS4S_NDL_webOS5_VideoDriver = {
     .Base = {
         .PostInit = SS4S_NDL_webOS5_Driver_PostInit,
@@ -215,5 +241,6 @@ const SS4S_VideoDriver SS4S_NDL_webOS5_VideoDriver = {
     .FeedWithPTS = FeedVideoWithPTS,
     .SizeChanged = SizeChanged,
     .SetHDRInfo = SetHDRInfo,
+    .GetVideoRenderQueueLength = GetVideoRenderQueueLength,
     .Close = CloseVideo,
 };
