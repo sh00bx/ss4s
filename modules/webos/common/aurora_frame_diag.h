@@ -45,6 +45,7 @@ void AuroraFrameDiagLogFeed(uint64_t pts, int render_queue_length);
  * the caller does not measure them.
  */
 void AuroraFrameDiagLogFeedAt(uint64_t pts, int render_queue_length, uint64_t feed_wall_ns,
+                              int64_t host_pts_us,
                               uint64_t submit_us, uint32_t bytes);
 
 /** SMP Load() callback tap for backpressure / drop events. */

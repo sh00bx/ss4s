@@ -29,6 +29,10 @@ static uint64_t diag_last_flush_ns = 0;
 static uint64_t diag_frame_number = 0;
 static uint64_t diag_last_feed_wall_ns = 0;
 static uint64_t diag_last_pts = 0;
+/* Host capture PTS (RTP 90kHz -> us) of the previous frame; <0 = none seen yet.
+ * Logged raw so the arrival jitter can be split into "already late at the host"
+ * vs "delayed after it" -- the feed wall-clock alone cannot tell those apart. */
+static int64_t diag_last_host_pts_us = -1;
 static bool diag_have_last = false;
 static char diag_backend[32] = "smp";
 static uint64_t diag_session_number = 0;
@@ -175,6 +179,7 @@ void AuroraFrameDiagBeginSession(const char *backend) {
     diag_last_flush_ns = 0;
     diag_frame_number = 0;
     diag_have_last = false;
+    diag_last_host_pts_us = -1;
     if (backend != NULL && backend[0] != '\0') {
         snprintf(diag_backend, sizeof(diag_backend), "%s", backend);
     }
@@ -223,11 +228,11 @@ uint64_t AuroraFrameDiagNowNs(void) {
 }
 
 void AuroraFrameDiagLogFeed(uint64_t pts, int render_queue_length) {
-    AuroraFrameDiagLogFeedAt(pts, render_queue_length, 0, 0, 0);
+    AuroraFrameDiagLogFeedAt(pts, render_queue_length, 0, -1, 0, 0);
 }
 
 void AuroraFrameDiagLogFeedAt(uint64_t pts, int render_queue_length, uint64_t feed_wall_ns,
-                              uint64_t submit_us, uint32_t bytes) {
+                              int64_t host_pts_us, uint64_t submit_us, uint32_t bytes) {
     if (!AuroraFrameDiagEnabled()) {
         return;
     }
@@ -240,15 +245,20 @@ void AuroraFrameDiagLogFeedAt(uint64_t pts, int render_queue_length, uint64_t fe
     diag_frame_number++;
     int64_t d_wall = 0;
     int64_t d_pts = 0;
+    int64_t d_host_pts = 0;
+    if (host_pts_us >= 0 && diag_last_host_pts_us >= 0) {
+        d_host_pts = host_pts_us - diag_last_host_pts_us;
+    }
     if (diag_have_last) {
         d_wall = (int64_t) (wall - diag_last_feed_wall_ns);
         d_pts = (int64_t) (pts - diag_last_pts);
     }
-    char line[448];
+    char line[560];
     int n = snprintf(line, sizeof(line),
                      "{\"type\":\"feed\",\"backend\":\"%s\",\"session\":%llu,\"frame\":%llu,"
                      "\"feed_wallclock_ns\":%llu,\"pts\":%llu,\"render_queue_length\":%d,"
                      "\"delta_feed_wall_ns\":%lld,\"delta_pts\":%lld,"
+                     "\"host_pts_us\":%lld,\"delta_host_pts_us\":%lld,"
                      "\"submit_us\":%llu,\"bytes\":%u}\n",
                      diag_backend,
                      (unsigned long long) diag_session_number,
@@ -258,6 +268,8 @@ void AuroraFrameDiagLogFeedAt(uint64_t pts, int render_queue_length, uint64_t fe
                      render_queue_length,
                      (long long) d_wall,
                      (long long) d_pts,
+                     (long long) host_pts_us,
+                     (long long) d_host_pts,
                      (unsigned long long) submit_us,
                      bytes);
     if (n > 0 && (size_t) n < sizeof(line)) {
@@ -265,6 +277,9 @@ void AuroraFrameDiagLogFeedAt(uint64_t pts, int render_queue_length, uint64_t fe
     }
     diag_last_feed_wall_ns = wall;
     diag_last_pts = pts;
+    if (host_pts_us >= 0) {
+        diag_last_host_pts_us = host_pts_us;
+    }
     diag_have_last = true;
     pthread_mutex_unlock(&diag_lock);
 }

@@ -92,7 +92,11 @@ static SS4S_VideoFeedResult FeedVideoWithPTS(SS4S_VideoInstance *instance, const
     uint64_t submitStart = diag ? AuroraFrameDiagNowNs() : 0;
     int rc = NDL_DirectVideoPlay((void *) data, size, (long long) pts);
     if (diag) {
-        AuroraFrameDiagLogFeedAt(pts, rqBefore, submitStart,
+        /* ptsUs is the raw host capture PTS (RTP 90kHz), independent of our own
+         * clock; `pts` above is client wall-clock unless smooth pacing is on. Logging
+         * both is what lets the analysis separate "the host emitted this frame late"
+         * from "it was delayed on the way to us". */
+        AuroraFrameDiagLogFeedAt(pts, rqBefore, submitStart, ptsUs,
                                  (AuroraFrameDiagNowNs() - submitStart) / 1000ULL, (uint32_t) size);
     }
     if (rc != 0) {
